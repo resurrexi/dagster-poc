@@ -30,6 +30,7 @@ assets:
       # must be defined in the partitions section
       - region
       - month
+    schedule: "0 0 1 * *"
     checks:
       - check_type: schema
       - check_type: row_count
@@ -54,6 +55,8 @@ assets:
           column: col3
           threshold_pct: 0.01
   - name: my_asset02
+    depends_on:
+      - my_asset01
     resources:
       - duckdb_resource
     column_schema:

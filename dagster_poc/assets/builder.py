@@ -1,4 +1,4 @@
-from typing import Dict, List, Sequence
+from typing import Dict, List
 
 import dagster as dg
 import yaml
@@ -53,6 +53,11 @@ def build_dagster_asset(asset: Asset) -> dg.AssetsDefinition:
 def build_partitions(
     partitions: List[Partition],
 ) -> List[Dict[str, dg.PartitionsDefinition]]:
+    """Build out partitions.
+
+    Builds out a dictionary of partition names to dagster partition definitions.
+    This is so that assets can utilize the same partition definitions if needed.
+    """
     definitions = []
 
     for pt in partitions:
@@ -62,12 +67,16 @@ def build_partitions(
     return definitions
 
 
-def build_assets(assets: List[Asset]) -> Sequence[dg.AssetsDefinition]:
+def build_assets(assets: List[Asset]) -> List[Dict[str, dg.AssetsDefinition]]:
+    """Build out assets.
+
+    Build out a dictionary of asset names to dagster asset definitions.
+    """
     definitions = []
 
     for asset in assets:
         asset_def = build_dagster_asset(asset)
-        definitions.append(asset_def)
+        definitions.append({asset.name, asset_def})
 
     return definitions
 

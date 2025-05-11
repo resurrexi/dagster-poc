@@ -166,9 +166,11 @@ class Check(BaseModel):
 
 class Asset(BaseModel):
     name: str
+    depends_on: Optional[str] = None
     resources: List[str]
     column_schema: Optional[List[Column]] = None
     partitions: Optional[List[str]] = None
+    schedule: str = "eager"
     checks: Optional[List[Check]] = None
 
 
@@ -184,6 +186,24 @@ class YamlConfiguration(BaseModel):
             if len(names) != len(set(names)):
                 raise ValueError("Duplicate names found")
             return value
+
+    @field_validator("assets")
+    @classmethod
+    def ensure_asset_dependencies_exist(cls, value: Any) -> Any:
+        # take inventory of all asset names
+        asset_names = set([asset.names for asset in value])
+
+        # take inventory of all asset dependencies
+        asset_deps = []
+        for asset in value:
+            if asset.depends_on is not None and len(asset.depends_on) > 0:
+                asset_deps.extend(asset.depends_on)
+        asset_deps = set(asset_deps)
+
+        difference = asset_deps - asset_names
+        if len(difference) > 0:
+            raise ValueError("Asset has dependencies that aren't met")
+        return value
 
     @model_validator(mode="after")
     def check_partitions_exist(self) -> Self:
