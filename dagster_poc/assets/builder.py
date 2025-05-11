@@ -1,27 +1,83 @@
+from typing import Dict, List, Sequence
+
 import dagster as dg
 import yaml
 
 from dagster_poc import BASE_DIR
-from dagster_poc.schemas.assets import AssetConfig, AssetsYamlConfig
+from dagster_poc.schemas.assets import (
+    Asset,
+    CategoricalPartitionConfig,
+    DailyPartitionConfig,
+    HourlyPartitionConfig,
+    MonthlyPartitionConfig,
+    Partition,
+    WeeklyPartitionConfig,
+    YamlConfiguration,
+)
 
 assets_yml = BASE_DIR / "assets" / "assets.yml"
 
 
-def load_config_from_yaml() -> AssetsYamlConfig:
+def _load_config_from_yaml() -> YamlConfiguration:
     yaml_content = yaml.safe_load(assets_yml.read_text())
-    config = AssetsYamlConfig.model_validate(yaml_content)
+    config = YamlConfiguration.model_validate(yaml_content)
 
     return config
 
 
-def build_asset(asset_config: AssetConfig) -> dg.AssetsDefinition:
-    @dg.asset(name=asset_config.asset_name)
-    def asset():
+def build_dagster_partition(partition: Partition) -> dg.PartitionsDefinition:
+    config = partition.config
+    config_kwargs = config.model_dump(by_alias=True)
+
+    if isinstance(config, HourlyPartitionConfig):
+        return dg.HourlyPartitionsDefinition(**config_kwargs)
+    if isinstance(config, DailyPartitionConfig):
+        return dg.DailyPartitionsDefinition(**config_kwargs)
+    if isinstance(config, WeeklyPartitionConfig):
+        return dg.WeeklyPartitionsDefinition(**config_kwargs)
+    if isinstance(config, MonthlyPartitionConfig):
+        return dg.MonthlyPartitionsDefinition(**config_kwargs)
+    if isinstance(config, CategoricalPartitionConfig):
+        return dg.StaticPartitionsDefinition(**config_kwargs)
+    raise ValueError("Unrecognizable configuration")
+
+
+def build_dagster_asset(asset: Asset) -> dg.AssetsDefinition:
+    @dg.asset(name=asset.name)
+    def dg_asset():
         pass  # TODO
 
+    return dg_asset
 
-def build_assets(config: AssetsYamlConfig):
-    asset_definitions = []
 
-    for asset_config in config.assets:
-        definition = build_asset(asset_config)
+def build_partitions(
+    partitions: List[Partition],
+) -> List[Dict[str, dg.PartitionsDefinition]]:
+    definitions = []
+
+    for pt in partitions:
+        pt_def = build_dagster_partition(pt)
+        definitions.append({pt.name: pt_def})
+
+    return definitions
+
+
+def build_assets(assets: List[Asset]) -> Sequence[dg.AssetsDefinition]:
+    definitions = []
+
+    for asset in assets:
+        asset_def = build_dagster_asset(asset)
+        definitions.append(asset_def)
+
+    return definitions
+
+
+def build_definitions():
+    config = _load_config_from_yaml()
+
+    if config.partitions is not None:
+        partition_defs = build_partitions(config.partitions)
+
+    asset_defs = build_assets(config.assets)
+
+    return asset_defs

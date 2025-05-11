@@ -1,40 +1,78 @@
+partitions:
+    - name: region
+      partition_type: categorical
+      config:
+        categories:
+          - us-east1
+          - us-west1
+    - name: month
+      partition_type: monthly
+      config:
+        start_date: "2024-03-01"
+    - name: week
+      partition_type: weekly
+      config:
+        start_date: "2024-03-01"
+
 assets:
-  - asset_name: my_asset01
+  - name: my_asset01
     resources:
       - taxi_resource
       - fs_resource
-    materialize_fn: materialize_asset
-    metadata_fn: materialize_meta
     column_schema:
       - name: col1
-        type: string
+        data_type: string
       - name: col2
-        type: integer
+        data_type: integer
       - name: col3
-        type: datetime
+        data_type: datetime
     partitions: # ordering matters here
-      - name: region
-        type: categorical
-        values:
-          - us-east1
-          - us-west1
-      - name: date
-        type: daily
+      # must be defined in the partitions section
+      - region
+      - month
     checks:
       - check_type: schema
       - check_type: row_count
-        severity: error
-        threshold_stddev: 2
-        min:
-          value: 100
-          operator: ge
-        max:
-          value: 200
-          operator: lt
+        config:
+          severity: error
+          threshold_stddev: 2
+          min:
+            value: 100
+            operator: ge
+          max:
+            value: 200
+            operator: lt
       - check_type: unique
-        column: col1
+        config:
+          column: col1
       - check_type: n_dist
-        column: col2
-      - check_type: null
-        column: col3
-        threshold_pct: 0.01
+        config:
+          column: col2
+      - check_type: nullity
+        config:
+          severity: error
+          column: col3
+          threshold_pct: 0.01
+  - name: my_asset02
+    resources:
+      - duckdb_resource
+    column_schema:
+      - name: col1
+        data_type: string
+      - name: col2
+        data_type: integer
+      - name: col3
+        data_type: datetime
+    partitions: # ordering matters here
+      # must be defined in the partitions section
+      - week
+    checks:
+      - check_type: schema
+      - check_type: row_count
+        config:
+          severity: error
+          threshold_stddev: 2
+      - check_type: nullity
+        config:
+          severity: error
+          column: col3
