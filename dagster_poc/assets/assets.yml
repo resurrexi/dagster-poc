@@ -33,27 +33,30 @@ assets:
     schedule: "0 0 1 * *"
     checks:
       - check_type: schema
-      - check_type: row_count
+      - check_type: volume
         config:
           severity: error
-          threshold_stddev: 2
           min:
             value: 100
             operator: ge
-          max:
-            value: 200
-            operator: lt
       - check_type: unique
         config:
           column: col1
-      - check_type: n_dist
+      - check_type: bounds
         config:
           column: col2
+          min:
+            value: 100
+            operator: ge
       - check_type: nullity
         config:
           severity: error
           column: col3
           threshold_pct: 0.01
+      - check_type: regex
+        config:
+          column: col1
+          pattern: r"^\d+{5}$"
   - name: my_asset02
     depends_on:
       - my_asset01
@@ -71,10 +74,9 @@ assets:
       - week
     checks:
       - check_type: schema
-      - check_type: row_count
+      - check_type: volume
         config:
           severity: error
-          threshold_stddev: 2
       - check_type: nullity
         config:
           severity: error

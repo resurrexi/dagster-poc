@@ -1,15 +1,24 @@
 import re
-from typing import Any, List, Literal, Optional, Union
+from typing import Any, List, Optional, Union
 
 from pydantic import (
     BaseModel,
     Field,
+    NonNegativeFloat,
     PositiveFloat,
     PositiveInt,
     field_validator,
     model_validator,
 )
 from typing_extensions import Self
+
+from dagster_poc.schemas.enums import (
+    CheckTypeEnum,
+    MaxOperatorEnum,
+    MinOperatorEnum,
+    PartitionTypeEnum,
+    SeverityEnum,
+)
 
 
 class Column(BaseModel):
@@ -18,13 +27,13 @@ class Column(BaseModel):
 
 
 class MinOperator(BaseModel):
-    value: PositiveInt
-    operator: Literal["gt", "ge"] = "ge"
+    value: int
+    operator: MinOperatorEnum = MinOperatorEnum.GE
 
 
 class MaxOperator(BaseModel):
-    value: PositiveInt
-    operator: Literal["lt", "le"] = "le"
+    value: int
+    operator: MaxOperatorEnum = MaxOperatorEnum.LE
 
 
 class TimePartitionConfig(BaseModel):
@@ -39,7 +48,7 @@ class TimePartitionConfig(BaseModel):
     def ensure_date_format(cls, value: Any) -> Any:
         if isinstance(value, str):
             if re.fullmatch(r"^\d{4}-\d{2}-\d{2}$", value) is None:
-                raise ValueError("Invalid date format")
+                raise ValueError("Invalid `date_format`")
         return value
 
 
@@ -64,7 +73,7 @@ class CategoricalPartitionConfig(BaseModel):
 
 class Partition(BaseModel):
     name: str
-    partition_type: Literal["hourly", "daily", "weekly", "monthly", "categorical"]
+    partition_type: PartitionTypeEnum
     config: Union[
         HourlyPartitionConfig,
         DailyPartitionConfig,
@@ -78,38 +87,53 @@ class Partition(BaseModel):
     def set_config(cls, data: Any) -> Any:
         if isinstance(data, dict):
             config = data.get("config", {})
-            if data["partition_type"] == "hourly":
+            if data["partition_type"] == PartitionTypeEnum.HOURLY:
                 data["config"] = HourlyPartitionConfig(**config)
-            elif data["partition_type"] == "daily":
+            elif data["partition_type"] == PartitionTypeEnum.DAILY:
                 data["config"] = DailyPartitionConfig(**config)
-            elif data["partition_type"] == "weekly":
+            elif data["partition_type"] == PartitionTypeEnum.WEEKLY:
                 data["config"] = WeeklyPartitionConfig(**config)
-            elif data["partition_type"] == "monthly":
+            elif data["partition_type"] == PartitionTypeEnum.MONTHLY:
                 data["config"] = MonthlyPartitionConfig(**config)
-            elif data["partition_type"] == "categorical":
+            elif data["partition_type"] == PartitionTypeEnum.CATEGORICAL:
                 data["config"] = CategoricalPartitionConfig(**config)
             else:
-                raise ValueError("Invalid partition type")
+                raise ValueError("Invalid `partition_type`")
         return data
 
 
 class BaseCheckConfig(BaseModel):
-    severity: Literal["warn", "error"] = "warn"
+    severity: SeverityEnum = SeverityEnum.WARN
 
 
 class SchemaCheckConfig(BaseCheckConfig): ...
 
 
-class RowCountCheckConfig(BaseCheckConfig):
-    threshold_stddev: PositiveFloat = 2.0
+class VolumeCheckConfig(BaseCheckConfig):
+    anomaly_from_n: PositiveInt = 10
+    anomaly_stddev: PositiveFloat = 2.0
     min: Optional[MinOperator] = None
     max: Optional[MaxOperator] = None
+
+    @field_validator("anomaly_from_n")
+    @classmethod
+    def check_anomaly_from_n_gte_3(cls, value: PositiveInt) -> PositiveInt:
+        if value < 3:
+            raise ValueError("Must be >= 3")
+        return value
+
+    @field_validator("min", "max")
+    @classmethod
+    def check_min_max_positive(cls, value: Any) -> Any:
+        if value is not None and value.value <= 0:
+            raise ValueError("`value` attribute must be positive")
+        return value
 
     @model_validator(mode="after")
     def check_min_lt_max(self) -> Self:
         if self.min and self.max:
             if self.min.value >= self.max.value:
-                raise ValueError("Min value must be less than max value")
+                raise ValueError("`min.value` must be less than `max.value`")
         return self
 
 
@@ -117,28 +141,37 @@ class UniqueCheckConfig(BaseCheckConfig):
     column: str
 
 
-class NumericDistributionCheckConfig(BaseCheckConfig):
+class BoundsCheckConfig(BaseCheckConfig):
     column: str
+    min: Optional[MinOperator] = None
+    max: Optional[MaxOperator] = None
 
-
-class CategoricalDistributionCheckConfig(BaseCheckConfig):
-    column: str
+    @model_validator(mode="after")
+    def check_min_lt_max(self) -> Self:
+        if self.min and self.max:
+            if self.min.value >= self.max.value:
+                raise ValueError("`min.value` must be less than `max.value`")
+        return self
 
 
 class NullCheckConfig(BaseCheckConfig):
     column: str
-    threshold_stddev: PositiveFloat = 2.0
-    threshold_pct: PositiveFloat = 0.05
+    threshold_pct: NonNegativeFloat = 0
+
+
+class RegexCheckConfig(BaseCheckConfig):
+    column: str
+    pattern: str
+    threshold_pct: NonNegativeFloat = 0
 
 
 class Check(BaseModel):
-    check_type: Literal["schema", "row_count", "unique", "n_dist", "c_dist", "nullity"]
+    check_type: CheckTypeEnum
     config: Union[
         SchemaCheckConfig,
-        RowCountCheckConfig,
+        VolumeCheckConfig,
         UniqueCheckConfig,
-        NumericDistributionCheckConfig,
-        CategoricalDistributionCheckConfig,
+        BoundsCheckConfig,
         NullCheckConfig,
     ]
 
@@ -147,20 +180,20 @@ class Check(BaseModel):
     def set_config(cls, data: Any) -> Any:
         if isinstance(data, dict):
             config = data.get("config", {})
-            if data["check_type"] == "schema":
+            if data["check_type"] == CheckTypeEnum.SCHEMA:
                 data["config"] = SchemaCheckConfig(**config)
-            elif data["check_type"] == "row_count":
-                data["config"] = RowCountCheckConfig(**config)
-            elif data["check_type"] == "unique":
+            elif data["check_type"] == CheckTypeEnum.VOLUME:
+                data["config"] = VolumeCheckConfig(**config)
+            elif data["check_type"] == CheckTypeEnum.UNIQUE:
                 data["config"] = UniqueCheckConfig(**config)
-            elif data["check_type"] == "n_dist":
-                data["config"] = NumericDistributionCheckConfig(**config)
-            elif data["check_type"] == "c_dist":
-                data["config"] = CategoricalDistributionCheckConfig(**config)
-            elif data["check_type"] == "nullity":
+            elif data["check_type"] == CheckTypeEnum.BOUNDS:
+                data["config"] = BoundsCheckConfig(**config)
+            elif data["check_type"] == CheckTypeEnum.NULLITY:
                 data["config"] = NullCheckConfig(**config)
+            elif data["check_type"] == CheckTypeEnum.REGEX:
+                data["config"] = RegexCheckConfig(**config)
             else:
-                raise ValueError("Invalid check type")
+                raise ValueError("Invalid `check_type`")
         return data
 
 
@@ -184,7 +217,7 @@ class YamlConfiguration(BaseModel):
         if value is not None and len(value) > 0:
             names = [i.name for i in value]
             if len(names) != len(set(names)):
-                raise ValueError("Duplicate names found")
+                raise ValueError("Duplicate `name`s found")
             return value
 
     @field_validator("assets")
@@ -202,7 +235,7 @@ class YamlConfiguration(BaseModel):
 
         difference = asset_deps - asset_names
         if len(difference) > 0:
-            raise ValueError("Asset has dependencies that aren't met")
+            raise ValueError("Undefined asset `name`s referenced")
         return value
 
     @model_validator(mode="after")
@@ -213,5 +246,5 @@ class YamlConfiguration(BaseModel):
                 if asset.partitions is not None:
                     checks = [pt in partition_names for pt in asset.partitions]
                     if not all(checks):
-                        raise ValueError("Undefined partition names referenced")
+                        raise ValueError("Undefined partition `name`s referenced")
         return self
